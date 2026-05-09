@@ -1,13 +1,17 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import {
+  AlertTriangle,
   ArrowDown,
   ArrowLeft,
   ArrowUp,
+  CalendarDays,
   Check,
   Circle,
+  ClipboardList,
   Clock3,
   FileText,
+  Flag,
   Filter,
   GripVertical,
   Lightbulb,
@@ -22,6 +26,7 @@ import {
   Send,
   Settings,
   ShieldCheck,
+  Sparkles,
   Trash2,
   Undo2,
   Users,
@@ -32,6 +37,12 @@ import './styles.css';
 const STORAGE_KEY = 'unidades-state';
 const SESSION_KEY = 'unidades-session';
 const COLORS = ['#69b578', '#e0a458', '#5d8aa8', '#d96570', '#7b6bb7'];
+const PRIORITIES = {
+  low: { label: 'baixa', weight: 1 },
+  normal: { label: 'normal', weight: 2 },
+  high: { label: 'alta', weight: 3 },
+  urgent: { label: 'urgente', weight: 4 }
+};
 const UNITS = [
   { id: 'jaguapita', name: 'Jaguapitã', password: 'jaguapita', accent: '#69b578' },
   { id: 'palmeiras', name: 'Palmeiras', password: 'palmeiras', accent: '#e0a458' },
@@ -76,7 +87,12 @@ function normalizeState(input) {
           ...emptyUnit(unit),
           ...(state.units?.[unit.id] || {}),
           name: unit.name,
-          documents: Array.isArray(state.units?.[unit.id]?.documents) ? state.units[unit.id].documents : [],
+          documents: Array.isArray(state.units?.[unit.id]?.documents)
+            ? state.units[unit.id].documents.map((document) => ({
+                ...document,
+                tasks: sortTasks(document.tasks || [])
+              }))
+            : [],
           activity: Array.isArray(state.units?.[unit.id]?.activity) ? state.units[unit.id].activity : []
         }
       ])
@@ -389,6 +405,83 @@ function completion(doc) {
 
 function isComplete(doc) {
   return doc.tasks?.length > 0 && doc.tasks.every((task) => task.done);
+}
+
+function normalizeTask(task, order = 0) {
+  return {
+    ...task,
+    order: Number.isFinite(task.order) ? task.order : order,
+    priority: task.priority && PRIORITIES[task.priority] ? task.priority : 'normal',
+    dueAt: task.dueAt || ''
+  };
+}
+
+function sortTasks(tasks = []) {
+  return [...tasks].map(normalizeTask).sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+}
+
+function taskDueState(task) {
+  if (task.done || !task.dueAt) return 'none';
+  const diffDays = taskDueDiffDays(task);
+  if (diffDays < 0) return 'late';
+  if (diffDays <= 1) return 'soon';
+  return 'scheduled';
+}
+
+function taskDueDiffDays(task) {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const due = new Date(`${task.dueAt}T00:00:00`);
+  return Math.round((due.getTime() - today.getTime()) / 86400000);
+}
+
+function taskScore(task) {
+  const dueScores = { late: 40, soon: 25, scheduled: 8, none: 0 };
+  return (PRIORITIES[task.priority || 'normal']?.weight || 2) * 10 + dueScores[taskDueState(task)];
+}
+
+function attentionItems(unit) {
+  return (unit.documents || [])
+    .filter((doc) => !doc.deletedAt)
+    .flatMap((doc) =>
+      sortTasks(doc.tasks)
+        .filter((task) => !task.done)
+        .map((task) => ({ doc, task, score: taskScore(task) }))
+    )
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 5);
+}
+
+function dueLabel(task) {
+  if (!task.dueAt) return 'sem prazo';
+  const state = taskDueState(task);
+  const label = formatShortDate(task.dueAt);
+  const diffDays = taskDueDiffDays(task);
+  if (state === 'late') return `atrasado desde ${label}`;
+  if (diffDays === 0) return 'vence hoje';
+  if (diffDays === 1) return 'vence amanhã';
+  return `prazo ${label}`;
+}
+
+function meetingSummary(doc) {
+  const tasks = sortTasks(doc.tasks);
+  const pending = tasks.filter((task) => !task.done);
+  const done = tasks.filter((task) => task.done);
+  const lines = [
+    `Documento: ${doc.title}`,
+    doc.owner ? `Responsavel/pedido por: ${doc.owner}` : '',
+    doc.context ? `Contexto: ${doc.context}` : '',
+    `Andamento: ${completion(doc)}% (${done.length}/${tasks.length})`,
+    '',
+    'Pendencias:',
+    ...(pending.length
+      ? pending.map((task) => `- ${task.text} | prioridade ${PRIORITIES[task.priority || 'normal'].label} | ${dueLabel(task)}`)
+      : ['- Nenhuma pendencia aberta.']),
+    '',
+    'Concluido:',
+    ...(done.length ? done.map((task) => `- ${task.text}`) : ['- Nada marcado como concluido ainda.'])
+  ].filter((line, index, list) => line || list[index - 1]);
+  return lines.join('\n');
 }
 
 function messagesForUnit(state, unitId) {
@@ -1269,6 +1362,7 @@ function DocumentWorkspace({ mode, onEmptyTrash, onSaveUnit, unit }) {
   const activeCount = unit.documents.filter((doc) => !doc.deletedAt).length;
   const pendingCount = unit.documents.filter((doc) => !doc.deletedAt && !isComplete(doc)).length;
   const doneCount = unit.documents.filter((doc) => !doc.deletedAt && isComplete(doc)).length;
+  const focusItems = useMemo(() => attentionItems(unit), [unit]);
 
   useEffect(() => {
     if (selected?.id) setSelectedId(selected.id);
@@ -1312,6 +1406,8 @@ function DocumentWorkspace({ mode, onEmptyTrash, onSaveUnit, unit }) {
         done: false,
         note: '',
         order: index,
+        priority: payload.priority || 'normal',
+        dueAt: payload.dueAt || '',
         createdAt: isoNow(),
         updatedAt: isoNow()
       }))
@@ -1362,6 +1458,14 @@ function DocumentWorkspace({ mode, onEmptyTrash, onSaveUnit, unit }) {
           <Plus size={21} /> Novo
         </button>
       </section>
+
+      <FocusQueue
+        items={focusItems}
+        onSelect={(docId) => {
+          setSelectedId(docId);
+          setMobileView('detail');
+        }}
+      />
 
       <section className={`workspace ${mobileView === 'detail' ? 'show-detail' : 'show-list'}`}>
         <aside className="sidebar">
@@ -1454,6 +1558,31 @@ function Stat({ label, tone = '', value }) {
   );
 }
 
+function FocusQueue({ items, onSelect }) {
+  if (!items.length) return null;
+  return (
+    <section className="focus-queue">
+      <div className="focus-title">
+        <Sparkles size={18} />
+        <strong>Atenção agora</strong>
+        <span>{items.length} prioridade(s)</span>
+      </div>
+      <div className="focus-items">
+        {items.map(({ doc, task }) => (
+          <button className={`focus-item ${taskDueState(task)}`} key={`${doc.id}-${task.id}`} onClick={() => onSelect(doc.id)} type="button">
+            <span>
+              <strong>{task.text}</strong>
+              <small>{doc.title}</small>
+            </span>
+            <b>{PRIORITIES[task.priority || 'normal'].label}</b>
+            <em>{dueLabel(task)}</em>
+          </button>
+        ))}
+      </div>
+    </section>
+  );
+}
+
 function FilterButton({ active, label, onClick }) {
   return (
     <button className={active ? 'active' : ''} onClick={onClick} type="button">
@@ -1463,9 +1592,11 @@ function FilterButton({ active, label, onClick }) {
 }
 
 function DocumentDetail({ doc, mode, onBack, onEmptyTrash, onPatch }) {
-  const doneCount = doc.tasks.filter((task) => task.done).length;
+  const tasks = sortTasks(doc.tasks);
+  const doneCount = tasks.filter((task) => task.done).length;
   const [draftTask, setDraftTask] = useState('');
   const [editingDoc, setEditingDoc] = useState(false);
+  const [copied, setCopied] = useState(false);
   const [docDraft, setDocDraft] = useState({ title: doc.title, owner: doc.owner || '', context: doc.context || '' });
 
   useEffect(() => {
@@ -1486,6 +1617,8 @@ function DocumentDetail({ doc, mode, onBack, onEmptyTrash, onPatch }) {
           done: false,
           note: '',
           order: current.tasks.length,
+          priority: 'normal',
+          dueAt: '',
           createdAt: isoNow(),
           updatedAt: isoNow()
         }
@@ -1495,7 +1628,7 @@ function DocumentDetail({ doc, mode, onBack, onEmptyTrash, onPatch }) {
   }
 
   function moveTask(taskId, direction) {
-    const tasks = [...doc.tasks];
+    const tasks = sortTasks(doc.tasks);
     const index = tasks.findIndex((task) => task.id === taskId);
     const nextIndex = index + direction;
     if (nextIndex < 0 || nextIndex >= tasks.length) return;
@@ -1597,11 +1730,11 @@ function DocumentDetail({ doc, mode, onBack, onEmptyTrash, onPatch }) {
       <section className="task-panel">
         <div className="section-title">
           <h3>Alterações e pendências</h3>
-          <span>{doneCount}/{doc.tasks.length}</span>
+          <span>{doneCount}/{tasks.length}</span>
         </div>
 
         <div className="task-list">
-          {doc.tasks.map((task, index) => (
+          {tasks.map((task, index) => (
             <TaskRow
               index={index}
               key={task.id}
@@ -1609,7 +1742,7 @@ function DocumentDetail({ doc, mode, onBack, onEmptyTrash, onPatch }) {
               onRemove={removeTask}
               onUpdate={updateTask}
               task={task}
-              total={doc.tasks.length}
+              total={tasks.length}
             />
           ))}
         </div>
@@ -1634,15 +1767,32 @@ function DocumentDetail({ doc, mode, onBack, onEmptyTrash, onPatch }) {
       </section>
 
       <section className="meeting-card">
-        <h3>Cola para reunião</h3>
-        <p>Use os marcadores para saber o que já foi falado.</p>
+        <div className="section-title">
+          <div className="section-title-label">
+            <ClipboardList size={18} />
+            <h3>Cola para reunião</h3>
+          </div>
+          <button
+            className="ghost"
+            onClick={async () => {
+              await navigator.clipboard?.writeText(meetingSummary(doc));
+              setCopied(true);
+              setTimeout(() => setCopied(false), 1800);
+            }}
+            type="button"
+          >
+            <ClipboardList size={17} /> {copied ? 'Copiado' : 'Copiar'}
+          </button>
+        </div>
+        <p>Resumo pronto para abrir conversa, alinhar pendências e fechar próximos passos.</p>
         <div className="chips">
-          {doc.tasks.map((task) => (
+          {tasks.map((task) => (
             <span className={task.done ? 'done' : ''} key={task.id}>
               {task.text}
             </span>
           ))}
         </div>
+        <pre className="meeting-summary">{meetingSummary(doc)}</pre>
       </section>
 
       {doc.deletedAt ? (
@@ -1666,11 +1816,12 @@ function DocumentDetail({ doc, mode, onBack, onEmptyTrash, onPatch }) {
 function TaskRow({ index, onMove, onRemove, onUpdate, task, total }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(task.text);
+  const dueState = taskDueState(task);
 
   useEffect(() => setDraft(task.text), [task.text]);
 
   return (
-    <div className={`task-row ${task.done ? 'done' : ''}`}>
+    <div className={`task-row ${task.done ? 'done' : ''} due-${dueState}`}>
       <GripVertical className="drag-icon" size={21} />
       <button
         className={`check-button ${task.done ? 'checked' : ''}`}
@@ -1685,6 +1836,35 @@ function TaskRow({ index, onMove, onRemove, onUpdate, task, total }) {
       ) : (
         <span>{task.text}</span>
       )}
+      <div className="task-meta">
+        <label title="Prioridade">
+          <Flag size={15} />
+          <select
+            onInput={(event) => onUpdate(task.id, { priority: event.currentTarget.value })}
+            value={task.priority || 'normal'}
+          >
+            {Object.entries(PRIORITIES).map(([key, item]) => (
+              <option key={key} value={key}>
+                {item.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label title="Prazo">
+          <CalendarDays size={15} />
+          <input
+            aria-label="Prazo da pendência"
+            onInput={(event) => onUpdate(task.id, { dueAt: event.currentTarget.value })}
+            type="date"
+            value={task.dueAt || ''}
+          />
+        </label>
+        {dueState === 'late' || dueState === 'soon' ? (
+          <strong className={`due-pill ${dueState}`}>
+            <AlertTriangle size={14} /> {dueLabel(task)}
+          </strong>
+        ) : null}
+      </div>
       <div className="task-actions">
         <button className="icon-button mini" disabled={index === 0} onClick={() => onMove(task.id, -1)} title="Subir" type="button">
           <ArrowUp size={16} />
@@ -1728,6 +1908,8 @@ function NewDocumentModal({ onClose, onCreate }) {
   const [title, setTitle] = useState('');
   const [owner, setOwner] = useState('');
   const [context, setContext] = useState('');
+  const [priority, setPriority] = useState('normal');
+  const [dueAt, setDueAt] = useState('');
   const [taskDraft, setTaskDraft] = useState('');
   const [tasks, setTasks] = useState([]);
 
@@ -1744,6 +1926,8 @@ function NewDocumentModal({ onClose, onCreate }) {
       title: title.trim(),
       owner: owner.trim(),
       context: context.trim(),
+      priority,
+      dueAt,
       tasks: tasks.length ? tasks : ['Conferir documento']
     });
   }
@@ -1776,6 +1960,22 @@ function NewDocumentModal({ onClose, onCreate }) {
         ) : null}
         {step === 2 ? (
           <div>
+            <div className="modal-grid task-defaults">
+              <label>
+                Prioridade inicial
+                <select onInput={(event) => setPriority(event.currentTarget.value)} value={priority}>
+                  {Object.entries(PRIORITIES).map(([key, item]) => (
+                    <option key={key} value={key}>
+                      {item.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                Prazo inicial
+                <input onInput={(event) => setDueAt(event.currentTarget.value)} type="date" value={dueAt} />
+              </label>
+            </div>
             <form
               className="add-task"
               onSubmit={(event) => {

@@ -2,6 +2,16 @@
 
 Sistema de registros de documentos separado por unidade, com banco em Google Sheets via Google Apps Script.
 
+Este repositorio e a trilha experimental **Unidades Ultimate**, criada para evoluir o sistema sem alterar o repositorio original.
+
+## Primeiras melhorias Ultimate
+
+- Fila **Atencao agora** com as pendencias mais importantes da unidade.
+- Prioridade por pendencia: baixa, normal, alta e urgente.
+- Prazo por pendencia, com aviso visual para vencimentos de hoje, amanha e atrasados.
+- Cola de reuniao copiavel, com resumo do documento, andamento, pendencias e concluidos.
+- Build integrado para Google Apps Script em `apps-script/Index.html`.
+
 ## Links
 
 - App publicado: https://script.google.com/macros/s/AKfycbzKBQlkB3c4EBu7FAeoF-TUHxEsGH43rVZ32r54H3QxmXrukF-wiB9xmt0uQYB0s7n8/exec
