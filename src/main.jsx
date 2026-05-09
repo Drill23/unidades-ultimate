@@ -36,6 +36,7 @@ import './styles.css';
 
 const STORAGE_KEY = 'unidades-state';
 const SESSION_KEY = 'unidades-session';
+const UNIT_DRAFT_KEY_PREFIX = 'unidades-unit-draft';
 const COLORS = ['#69b578', '#e0a458', '#5d8aa8', '#d96570', '#7b6bb7'];
 const PRIORITIES = {
   low: { label: 'baixa', weight: 1 },
@@ -153,6 +154,34 @@ function readStoredSession() {
 function writeStoredSession(session) {
   if (session) localStorage.setItem(SESSION_KEY, JSON.stringify(session));
   else localStorage.removeItem(SESSION_KEY);
+}
+
+function unitDraftKey(unitId) {
+  return `${UNIT_DRAFT_KEY_PREFIX}:${unitId || 'unknown'}`;
+}
+
+function readUnitMessageDraft(unitId) {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(unitDraftKey(unitId)));
+    return {
+      title: String(parsed?.title || ''),
+      text: String(parsed?.text || '')
+    };
+  } catch {
+    return { title: '', text: '' };
+  }
+}
+
+function writeUnitMessageDraft(unitId, draft) {
+  const clean = {
+    title: String(draft?.title || ''),
+    text: String(draft?.text || '')
+  };
+  if (!clean.title.trim() && !clean.text.trim()) {
+    localStorage.removeItem(unitDraftKey(unitId));
+    return;
+  }
+  localStorage.setItem(unitDraftKey(unitId), JSON.stringify(clean));
 }
 
 async function localCall(functionName, ...args) {
@@ -923,6 +952,16 @@ function UnitMessages({ messages, onReply, onSeen, onSendUnitMessage, unitId }) 
   const [title, setTitle] = useState('');
   const [text, setText] = useState('');
 
+  useEffect(() => {
+    const saved = readUnitMessageDraft(unitId);
+    setTitle(saved.title);
+    setText(saved.text);
+  }, [unitId]);
+
+  useEffect(() => {
+    writeUnitMessageDraft(unitId, { title, text });
+  }, [unitId, title, text]);
+
   async function submit(event) {
     event.preventDefault();
     if (!text.trim()) return;
@@ -951,6 +990,7 @@ function UnitMessages({ messages, onReply, onSeen, onSendUnitMessage, unitId }) 
           <Send size={17} /> Enviar
         </button>
       </form>
+      <small className="draft-hint">{title.trim() || text.trim() ? 'Rascunho salvo neste aparelho.' : 'Sem rascunho pendente.'}</small>
       {expanded ? (
         <div className="message-list">
           {messages.length ? (

@@ -840,6 +840,12 @@ label {
   grid-template-columns: minmax(140px, 0.6fr) minmax(180px, 1fr) auto;
 }
 
+.draft-hint {
+  color: #637276;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
 .message-card-actions {
   display: flex;
   justify-content: end;
