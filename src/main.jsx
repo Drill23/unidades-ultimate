@@ -1598,11 +1598,25 @@ function DocumentDetail({ doc, mode, onBack, onEmptyTrash, onPatch }) {
   const [editingDoc, setEditingDoc] = useState(false);
   const [copied, setCopied] = useState(false);
   const [docDraft, setDocDraft] = useState({ title: doc.title, owner: doc.owner || '', context: doc.context || '' });
+  const [metaDraft, setMetaDraft] = useState({ owner: doc.owner || '', context: doc.context || '' });
 
   useEffect(() => {
     setDocDraft({ title: doc.title, owner: doc.owner || '', context: doc.context || '' });
+    setMetaDraft({ owner: doc.owner || '', context: doc.context || '' });
     setEditingDoc(false);
   }, [doc.id, doc.title, doc.owner, doc.context]);
+
+  useEffect(() => {
+    if (editingDoc) return undefined;
+    const ownerChanged = (metaDraft.owner || '') !== (doc.owner || '');
+    const contextChanged = (metaDraft.context || '') !== (doc.context || '');
+    if (!ownerChanged && !contextChanged) return undefined;
+
+    const timer = setTimeout(() => {
+      onPatch(doc.id, (current) => ({ ...current, owner: metaDraft.owner, context: metaDraft.context }));
+    }, 420);
+    return () => clearTimeout(timer);
+  }, [doc.id, doc.owner, doc.context, editingDoc, metaDraft.context, metaDraft.owner, onPatch]);
 
   function addTask() {
     const text = draftTask.trim();
@@ -1713,15 +1727,15 @@ function DocumentDetail({ doc, mode, onBack, onEmptyTrash, onPatch }) {
           <label>
             Responsável ou pedido por
             <input
-              onChange={(event) => onPatch(doc.id, (current) => ({ ...current, owner: event.target.value }))}
-              value={doc.owner || ''}
+              onChange={(event) => setMetaDraft((current) => ({ ...current, owner: event.target.value }))}
+              value={metaDraft.owner}
             />
           </label>
           <label>
             Contexto rápido
             <input
-              onChange={(event) => onPatch(doc.id, (current) => ({ ...current, context: event.target.value }))}
-              value={doc.context || ''}
+              onChange={(event) => setMetaDraft((current) => ({ ...current, context: event.target.value }))}
+              value={metaDraft.context}
             />
           </label>
         </div>
