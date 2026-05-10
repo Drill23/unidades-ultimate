@@ -1034,6 +1034,8 @@ function UnitMessages({ messages, onReply, onSeen, onSendUnitMessage, unitId }) 
   const [expanded, setExpanded] = useState(Boolean(visible.length));
   const [title, setTitle] = useState('');
   const [text, setText] = useState('');
+  const [isSending, setIsSending] = useState(false);
+  const [sendError, setSendError] = useState('');
 
   useEffect(() => {
     const saved = readUnitMessageDraft(unitId);
@@ -1047,14 +1049,22 @@ function UnitMessages({ messages, onReply, onSeen, onSendUnitMessage, unitId }) 
 
   async function submit(event) {
     event.preventDefault();
-    if (!text.trim()) return;
-    await onSendUnitMessage({
-      title: title.trim() || 'Mensagem da unidade',
-      text: text.trim()
-    });
-    setTitle('');
-    setText('');
-    setExpanded(true);
+    if (!text.trim() || isSending) return;
+    setSendError('');
+    setIsSending(true);
+    try {
+      await onSendUnitMessage({
+        title: title.trim() || 'Mensagem da unidade',
+        text: text.trim()
+      });
+      setTitle('');
+      setText('');
+      setExpanded(true);
+    } catch {
+      setSendError('Não consegui enviar sua mensagem agora.');
+    } finally {
+      setIsSending(false);
+    }
   }
 
   return (
@@ -1067,12 +1077,13 @@ function UnitMessages({ messages, onReply, onSeen, onSendUnitMessage, unitId }) 
         </button>
       </div>
       <form className="unit-message-form" onSubmit={submit}>
-        <input onChange={(event) => setTitle(event.target.value)} placeholder="Assunto para Rosa" value={title} />
-        <input onChange={(event) => setText(event.target.value)} placeholder="Mensagem nova para Rosa" value={text} />
-        <button className="primary" type="submit">
-          <Send size={17} /> Enviar
+        <input disabled={isSending} onChange={(event) => setTitle(event.target.value)} placeholder="Assunto para Rosa" value={title} />
+        <input disabled={isSending} onChange={(event) => setText(event.target.value)} placeholder="Mensagem nova para Rosa" value={text} />
+        <button className="primary" disabled={!text.trim() || isSending} type="submit">
+          <Send size={17} /> {isSending ? 'Enviando...' : 'Enviar'}
         </button>
       </form>
+      {sendError ? <p className="error-line">{sendError}</p> : null}
       <small className="draft-hint">{title.trim() || text.trim() ? 'Rascunho salvo neste aparelho.' : 'Sem rascunho pendente.'}</small>
       {expanded ? (
         <div className="message-list">
@@ -1097,6 +1108,8 @@ function UnitMessages({ messages, onReply, onSeen, onSendUnitMessage, unitId }) 
 
 function UnitMessageCard({ message, onReply, onSeen, unitId }) {
   const [reply, setReply] = useState(() => readUnitReplyDraft(unitId, message.id));
+  const [isReplying, setIsReplying] = useState(false);
+  const [replyError, setReplyError] = useState('');
   const seen = (message.seenBy || []).includes(unitId);
   const fromUnit = message.from === 'unit';
   const replies = (message.replies || []).filter((item) => item.unitId === unitId);
@@ -1107,9 +1120,17 @@ function UnitMessageCard({ message, onReply, onSeen, unitId }) {
 
   async function submit(event) {
     event.preventDefault();
-    if (!reply.trim()) return;
-    await onReply(message.id, reply.trim());
-    setReply('');
+    if (!reply.trim() || isReplying) return;
+    setReplyError('');
+    setIsReplying(true);
+    try {
+      await onReply(message.id, reply.trim());
+      setReply('');
+    } catch {
+      setReplyError('Não consegui enviar a resposta agora.');
+    } finally {
+      setIsReplying(false);
+    }
   }
 
   return (
@@ -1137,14 +1158,16 @@ function UnitMessageCard({ message, onReply, onSeen, unitId }) {
         <>
           <form className="reply-form" onSubmit={submit}>
             <input
+              disabled={isReplying}
               onChange={(event) => setReply(event.target.value)}
               placeholder="Responder esta mensagem da Rosa"
               value={reply}
             />
-            <button className="primary square" type="submit">
+            <button className="primary square" disabled={!reply.trim() || isReplying} type="submit">
               <Send size={17} />
             </button>
           </form>
+          {replyError ? <p className="error-line">{replyError}</p> : null}
           <small className="draft-hint reply-draft-hint">
             {reply.trim() ? 'Rascunho de resposta salvo neste aparelho.' : 'Sem rascunho de resposta pendente.'}
           </small>
@@ -1337,7 +1360,38 @@ function MessageHistory({ messages, onDeleteMessage, onUpdateMessage, selectedUn
   const [open, setOpen] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [draft, setDraft] = useState({ title: '', text: '', targets: [] });
+  const [statusFilter, setStatusFilter] = useState('all');
   const editingHasNoTargets = draft.targets.length === 0;
+  const counters = useMemo(() => {
+    return messages.reduce(
+      (acc, message) => {
+        if (message.from === 'unit') {
+          acc.unit += 1;
+          return acc;
+        }
+        if ((message.seenBy || []).includes(selectedUnitId)) acc.seen += 1;
+        else acc.pending += 1;
+        return acc;
+      },
+      { pending: 0, seen: 0, unit: 0 }
+    );
+  }, [messages, selectedUnitId]);
+  const filteredMessages = useMemo(() => {
+    if (statusFilter === 'pending') {
+      return messages.filter((message) => message.from !== 'unit' && !(message.seenBy || []).includes(selectedUnitId));
+    }
+    if (statusFilter === 'seen') {
+      return messages.filter((message) => message.from !== 'unit' && (message.seenBy || []).includes(selectedUnitId));
+    }
+    if (statusFilter === 'unit') return messages.filter((message) => message.from === 'unit');
+    return messages;
+  }, [messages, selectedUnitId, statusFilter]);
+  const emptyByFilter = {
+    all: 'Nenhuma mensagem desta unidade ainda.',
+    pending: 'Sem recados pendentes de leitura desta unidade.',
+    seen: 'Sem recados vistos desta unidade.',
+    unit: 'Sem mensagens avulsas enviadas por esta unidade.'
+  };
 
   function startEdit(message) {
     setEditingId(message.id);
@@ -1374,12 +1428,26 @@ function MessageHistory({ messages, onDeleteMessage, onUpdateMessage, selectedUn
           <MessageSquare size={18} />
           <strong>Mensagens de {unitName(selectedUnitId)}</strong>
         </span>
-        <b>{messages.length}</b>
+        <b>{filteredMessages.length}/{messages.length}</b>
       </button>
       {open ? (
         <div className="admin-message-list">
-          {messages.length ? (
-            messages.map((message) => {
+          <div className="message-filters">
+            <button className={statusFilter === 'all' ? 'active' : ''} onClick={() => setStatusFilter('all')} type="button">
+              Todas <b>{messages.length}</b>
+            </button>
+            <button className={statusFilter === 'pending' ? 'active' : ''} onClick={() => setStatusFilter('pending')} type="button">
+              Pendentes <b>{counters.pending}</b>
+            </button>
+            <button className={statusFilter === 'seen' ? 'active' : ''} onClick={() => setStatusFilter('seen')} type="button">
+              Vistas <b>{counters.seen}</b>
+            </button>
+            <button className={statusFilter === 'unit' ? 'active' : ''} onClick={() => setStatusFilter('unit')} type="button">
+              Avulsas <b>{counters.unit}</b>
+            </button>
+          </div>
+          {filteredMessages.length ? (
+            filteredMessages.map((message) => {
               const isEditing = editingId === message.id;
               const fromUnit = message.from === 'unit';
               return (
@@ -1494,7 +1562,7 @@ function MessageHistory({ messages, onDeleteMessage, onUpdateMessage, selectedUn
               );
             })
           ) : (
-            <p className="empty">Nenhuma mensagem desta unidade ainda.</p>
+            <p className="empty">{emptyByFilter[statusFilter]}</p>
           )}
         </div>
       ) : null}
