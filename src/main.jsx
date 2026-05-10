@@ -1210,7 +1210,7 @@ function AdminMessages({ onSendMessage, selectedUnitId, state }) {
         </button>
       </form>
       <small className="draft-hint">
-        {title.trim() || text.trim() ? 'Rascunho salvo neste aparelho.' : 'Sem rascunho pendente.'}
+        {title.trim() || text.trim() || selectedCount !== UNITS.length ? 'Rascunho salvo neste aparelho.' : 'Sem rascunho pendente.'}
       </small>
       <div className="sent-log">
         {state.messages
