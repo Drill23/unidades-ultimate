@@ -46,6 +46,35 @@ const PRIORITIES = {
   high: { label: 'alta', weight: 3 },
   urgent: { label: 'urgente', weight: 4 }
 };
+const ADMIN_MESSAGE_TEMPLATES = [
+  {
+    id: 'deadline_followup',
+    label: 'Cobrança de prazo',
+    title: 'Atualização de prazo pendente',
+    text: (targetLabel) =>
+      `Oi, ${targetLabel}. Preciso de um retorno hoje sobre o andamento das pendências e prazo de conclusão. Se houver bloqueio, sinalize o que precisa para destravar.`
+  },
+  {
+    id: 'status_update',
+    label: 'Pedido de retorno',
+    title: 'Retorno rápido solicitado',
+    text: (targetLabel) =>
+      `Olá, ${targetLabel}. Me envie um resumo curto: o que avançou, o que está pendente e qual o próximo passo previsto até amanhã.`
+  },
+  {
+    id: 'meeting_alignment',
+    label: 'Alinhamento de reunião',
+    title: 'Preparação para reunião de alinhamento',
+    text: (targetLabel) =>
+      `Time ${targetLabel}, vamos alinhar as prioridades da semana. Atualizem os itens críticos no documento e tragam dúvidas para tratarmos na próxima reunião.`
+  },
+  {
+    id: 'confirm_read',
+    label: 'Confirmação de leitura',
+    title: 'Confirmação de recebimento',
+    text: (targetLabel) => `Oi, ${targetLabel}. Confirmem o recebimento deste recado e informem quem ficará responsável pela execução.`
+  }
+];
 const UNITS = [
   { id: 'jaguapita', name: 'Jaguapitã', password: 'jaguapita', accent: '#69b578' },
   { id: 'palmeiras', name: 'Palmeiras', password: 'palmeiras', accent: '#e0a458' },
@@ -1174,8 +1203,10 @@ function AdminMessages({ onSendMessage, selectedUnitId, state }) {
   const [text, setText] = useState(initialDraft.text);
   const [targets, setTargets] = useState(initialDraft.targets);
   const [isSending, setIsSending] = useState(false);
+  const [lastTemplateId, setLastTemplateId] = useState('');
   const selectedCount = targets.length;
   const hasNoTargets = selectedCount === 0;
+  const selectedUnitName = unitName(selectedUnitId);
 
   useEffect(() => {
     writeAdminMessageDraft({ title, text, targets });
@@ -1186,6 +1217,14 @@ function AdminMessages({ onSendMessage, selectedUnitId, state }) {
       if (current.includes(unitId)) return current.filter((item) => item !== unitId);
       return [...current, unitId];
     });
+  }
+
+  function applyTemplate(template, mode = 'all') {
+    const targetLabel = mode === 'focused' ? selectedUnitName : 'equipe';
+    setTitle(template.title);
+    setText(template.text(targetLabel));
+    setTargets(mode === 'focused' ? [selectedUnitId] : UNITS.map((unit) => unit.id));
+    setLastTemplateId(template.id);
   }
 
   async function submit(event) {
@@ -1211,6 +1250,30 @@ function AdminMessages({ onSendMessage, selectedUnitId, state }) {
       <div className="section-title">
         <Send size={18} />
         <h2>Recado para unidades</h2>
+      </div>
+      <div className="template-bar">
+        {ADMIN_MESSAGE_TEMPLATES.map((template) => (
+          <button
+            className={`template-chip ${lastTemplateId === template.id ? 'active' : ''}`}
+            disabled={isSending}
+            key={template.id}
+            onClick={() => applyTemplate(template)}
+            type="button"
+          >
+            {template.label}
+          </button>
+        ))}
+        <button
+          className="text-button strong"
+          disabled={isSending}
+          onClick={() => {
+            const picked = ADMIN_MESSAGE_TEMPLATES.find((template) => template.id === lastTemplateId) || ADMIN_MESSAGE_TEMPLATES[0];
+            applyTemplate(picked, 'focused');
+          }}
+          type="button"
+        >
+          Usar para {selectedUnitName}
+        </button>
       </div>
       <form className="message-form" onSubmit={submit}>
         <input disabled={isSending} onChange={(event) => setTitle(event.target.value)} placeholder="Título do recado" value={title} />
