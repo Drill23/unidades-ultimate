@@ -230,7 +230,8 @@ function writeAdminMessageDraft(draft) {
     text: String(draft?.text || ''),
     targets: Array.isArray(draft?.targets) ? draft.targets.filter((unitId) => UNITS.some((unit) => unit.id === unitId)) : []
   };
-  if (!clean.title.trim() && !clean.text.trim()) {
+  const hasCustomTargets = clean.targets.length !== UNITS.length;
+  if (!clean.title.trim() && !clean.text.trim() && !hasCustomTargets) {
     localStorage.removeItem(ADMIN_DRAFT_KEY);
     return;
   }
@@ -1199,6 +1200,7 @@ function AdminMessages({ onSendMessage, selectedUnitId, state }) {
       });
       setTitle('');
       setText('');
+      setTargets(UNITS.map((unit) => unit.id));
     } finally {
       setIsSending(false);
     }
