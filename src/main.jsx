@@ -37,6 +37,7 @@ import './styles.css';
 const STORAGE_KEY = 'unidades-state';
 const SESSION_KEY = 'unidades-session';
 const UNIT_DRAFT_KEY_PREFIX = 'unidades-unit-draft';
+const UNIT_REPLY_DRAFT_KEY_PREFIX = 'unidades-unit-reply-draft';
 const ADMIN_DRAFT_KEY = 'unidades-admin-draft';
 const COLORS = ['#69b578', '#e0a458', '#5d8aa8', '#d96570', '#7b6bb7'];
 const PRIORITIES = {
@@ -161,6 +162,10 @@ function unitDraftKey(unitId) {
   return `${UNIT_DRAFT_KEY_PREFIX}:${unitId || 'unknown'}`;
 }
 
+function unitReplyDraftKey(unitId, messageId) {
+  return `${UNIT_REPLY_DRAFT_KEY_PREFIX}:${unitId || 'unknown'}:${messageId || 'unknown'}`;
+}
+
 function readUnitMessageDraft(unitId) {
   try {
     const parsed = JSON.parse(localStorage.getItem(unitDraftKey(unitId)));
@@ -185,14 +190,34 @@ function writeUnitMessageDraft(unitId, draft) {
   localStorage.setItem(unitDraftKey(unitId), JSON.stringify(clean));
 }
 
+function readUnitReplyDraft(unitId, messageId) {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(unitReplyDraftKey(unitId, messageId)));
+    return String(parsed?.text || '');
+  } catch {
+    return '';
+  }
+}
+
+function writeUnitReplyDraft(unitId, messageId, text) {
+  const clean = String(text || '');
+  if (!clean.trim()) {
+    localStorage.removeItem(unitReplyDraftKey(unitId, messageId));
+    return;
+  }
+  localStorage.setItem(unitReplyDraftKey(unitId, messageId), JSON.stringify({ text: clean }));
+}
+
 function readAdminMessageDraft() {
   try {
     const parsed = JSON.parse(localStorage.getItem(ADMIN_DRAFT_KEY));
-    const targets = Array.isArray(parsed?.targets) ? parsed.targets.filter((unitId) => UNITS.some((unit) => unit.id === unitId)) : [];
+    const parsedTargets = Array.isArray(parsed?.targets)
+      ? Array.from(new Set(parsed.targets.filter((unitId) => UNITS.some((unit) => unit.id === unitId))))
+      : null;
     return {
       title: String(parsed?.title || ''),
       text: String(parsed?.text || ''),
-      targets: targets.length ? targets : UNITS.map((unit) => unit.id)
+      targets: parsedTargets === null ? UNITS.map((unit) => unit.id) : parsedTargets
     };
   } catch {
     return { title: '', text: '', targets: UNITS.map((unit) => unit.id) };
@@ -1041,10 +1066,14 @@ function UnitMessages({ messages, onReply, onSeen, onSendUnitMessage, unitId }) 
 }
 
 function UnitMessageCard({ message, onReply, onSeen, unitId }) {
-  const [reply, setReply] = useState('');
+  const [reply, setReply] = useState(() => readUnitReplyDraft(unitId, message.id));
   const seen = (message.seenBy || []).includes(unitId);
   const fromUnit = message.from === 'unit';
   const replies = (message.replies || []).filter((item) => item.unitId === unitId);
+
+  useEffect(() => {
+    writeUnitReplyDraft(unitId, message.id, reply);
+  }, [unitId, message.id, reply]);
 
   async function submit(event) {
     event.preventDefault();
@@ -1075,16 +1104,21 @@ function UnitMessageCard({ message, onReply, onSeen, unitId }) {
         )}
       </div>
       {!fromUnit ? (
-        <form className="reply-form" onSubmit={submit}>
-          <input
-            onChange={(event) => setReply(event.target.value)}
-            placeholder="Responder esta mensagem da Rosa"
-            value={reply}
-          />
-          <button className="primary square" type="submit">
-            <Send size={17} />
-          </button>
-        </form>
+        <>
+          <form className="reply-form" onSubmit={submit}>
+            <input
+              onChange={(event) => setReply(event.target.value)}
+              placeholder="Responder esta mensagem da Rosa"
+              value={reply}
+            />
+            <button className="primary square" type="submit">
+              <Send size={17} />
+            </button>
+          </form>
+          <small className="draft-hint reply-draft-hint">
+            {reply.trim() ? 'Rascunho de resposta salvo neste aparelho.' : 'Sem rascunho de resposta pendente.'}
+          </small>
+        </>
       ) : null}
       {replies.length ? (
         <div className="reply-list">
@@ -1138,6 +1172,7 @@ function AdminMessages({ onSendMessage, selectedUnitId, state }) {
   const [title, setTitle] = useState(initialDraft.title);
   const [text, setText] = useState(initialDraft.text);
   const [targets, setTargets] = useState(initialDraft.targets);
+  const [isSending, setIsSending] = useState(false);
   const selectedCount = targets.length;
   const hasNoTargets = selectedCount === 0;
 
@@ -1154,14 +1189,19 @@ function AdminMessages({ onSendMessage, selectedUnitId, state }) {
 
   async function submit(event) {
     event.preventDefault();
-    if (!text.trim() || hasNoTargets) return;
-    await onSendMessage({
-      title: title.trim() || 'Recado da Rosa',
-      text: text.trim(),
-      targets
-    });
-    setTitle('');
-    setText('');
+    if (!text.trim() || hasNoTargets || isSending) return;
+    setIsSending(true);
+    try {
+      await onSendMessage({
+        title: title.trim() || 'Recado da Rosa',
+        text: text.trim(),
+        targets
+      });
+      setTitle('');
+      setText('');
+    } finally {
+      setIsSending(false);
+    }
   }
 
   return (
@@ -1171,12 +1211,13 @@ function AdminMessages({ onSendMessage, selectedUnitId, state }) {
         <h2>Recado para unidades</h2>
       </div>
       <form className="message-form" onSubmit={submit}>
-        <input onChange={(event) => setTitle(event.target.value)} placeholder="Título do recado" value={title} />
-        <textarea onChange={(event) => setText(event.target.value)} placeholder="Mensagem" value={text} />
+        <input disabled={isSending} onChange={(event) => setTitle(event.target.value)} placeholder="Título do recado" value={title} />
+        <textarea disabled={isSending} onChange={(event) => setText(event.target.value)} placeholder="Mensagem" value={text} />
         <div className="target-row">
           {UNITS.map((unit) => (
             <button
               className={targets.includes(unit.id) ? 'selected' : ''}
+              disabled={isSending}
               key={unit.id}
               onClick={() => toggleTarget(unit.id)}
               type="button"
@@ -1194,19 +1235,19 @@ function AdminMessages({ onSendMessage, selectedUnitId, state }) {
           <div className="target-actions">
             <button
               className="text-button"
-              disabled={selectedCount === UNITS.length}
+              disabled={selectedCount === UNITS.length || isSending}
               onClick={() => setTargets(UNITS.map((unit) => unit.id))}
               type="button"
             >
               Selecionar todas
             </button>
-            <button className="text-button" disabled={!selectedCount} onClick={() => setTargets([])} type="button">
+            <button className="text-button" disabled={!selectedCount || isSending} onClick={() => setTargets([])} type="button">
               Limpar seleção
             </button>
           </div>
         </div>
-        <button className="primary" disabled={hasNoTargets} type="submit">
-          <Send size={17} /> Enviar
+        <button className="primary" disabled={hasNoTargets || !text.trim() || isSending} type="submit">
+          <Send size={17} /> {isSending ? 'Enviando...' : 'Enviar'}
         </button>
       </form>
       <small className="draft-hint">
@@ -1300,7 +1341,31 @@ function MessageHistory({ messages, onDeleteMessage, onUpdateMessage, selectedUn
                           </button>
                         ))}
                       </div>
-                      {editingHasNoTargets ? <small className="target-hint warning">Selecione ao menos uma unidade para salvar.</small> : null}
+                      <div className="target-tools">
+                        <small className={`target-hint ${editingHasNoTargets ? 'warning' : ''}`}>
+                          {editingHasNoTargets
+                            ? 'Nenhuma unidade selecionada: selecione ao menos uma para salvar.'
+                            : `${draft.targets.length}/${UNITS.length} unidade(s) selecionada(s).`}
+                        </small>
+                        <div className="target-actions">
+                          <button
+                            className="text-button"
+                            disabled={draft.targets.length === UNITS.length}
+                            onClick={() => setDraft((current) => ({ ...current, targets: UNITS.map((unit) => unit.id) }))}
+                            type="button"
+                          >
+                            Selecionar todas
+                          </button>
+                          <button
+                            className="text-button"
+                            disabled={editingHasNoTargets}
+                            onClick={() => setDraft((current) => ({ ...current, targets: [] }))}
+                            type="button"
+                          >
+                            Limpar seleção
+                          </button>
+                        </div>
+                      </div>
                       <div className="message-tools">
                         <button className="ghost" onClick={() => setEditingId(null)} type="button">
                           Cancelar

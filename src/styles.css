@@ -870,6 +870,10 @@ label {
   grid-template-columns: minmax(0, 1fr) auto;
 }
 
+.reply-draft-hint {
+  grid-column: 1 / -1;
+}
+
 .reply-list {
   display: grid;
   gap: 8px;
