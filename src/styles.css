@@ -943,6 +943,34 @@ label {
   gap: 8px;
 }
 
+.target-tools {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: space-between;
+}
+
+.target-hint {
+  color: #637276;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.target-hint.warning {
+  color: #8a5b0a;
+}
+
+.target-actions {
+  display: flex;
+  gap: 10px;
+}
+
+.target-actions .text-button {
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
 .message-form {
   grid-template-columns: 1fr;
 }

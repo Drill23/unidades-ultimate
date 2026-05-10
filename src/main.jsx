@@ -37,6 +37,7 @@ import './styles.css';
 const STORAGE_KEY = 'unidades-state';
 const SESSION_KEY = 'unidades-session';
 const UNIT_DRAFT_KEY_PREFIX = 'unidades-unit-draft';
+const ADMIN_DRAFT_KEY = 'unidades-admin-draft';
 const COLORS = ['#69b578', '#e0a458', '#5d8aa8', '#d96570', '#7b6bb7'];
 const PRIORITIES = {
   low: { label: 'baixa', weight: 1 },
@@ -182,6 +183,33 @@ function writeUnitMessageDraft(unitId, draft) {
     return;
   }
   localStorage.setItem(unitDraftKey(unitId), JSON.stringify(clean));
+}
+
+function readAdminMessageDraft() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(ADMIN_DRAFT_KEY));
+    const targets = Array.isArray(parsed?.targets) ? parsed.targets.filter((unitId) => UNITS.some((unit) => unit.id === unitId)) : [];
+    return {
+      title: String(parsed?.title || ''),
+      text: String(parsed?.text || ''),
+      targets: targets.length ? targets : UNITS.map((unit) => unit.id)
+    };
+  } catch {
+    return { title: '', text: '', targets: UNITS.map((unit) => unit.id) };
+  }
+}
+
+function writeAdminMessageDraft(draft) {
+  const clean = {
+    title: String(draft?.title || ''),
+    text: String(draft?.text || ''),
+    targets: Array.isArray(draft?.targets) ? draft.targets.filter((unitId) => UNITS.some((unit) => unit.id === unitId)) : []
+  };
+  if (!clean.title.trim() && !clean.text.trim()) {
+    localStorage.removeItem(ADMIN_DRAFT_KEY);
+    return;
+  }
+  localStorage.setItem(ADMIN_DRAFT_KEY, JSON.stringify(clean));
 }
 
 async function localCall(functionName, ...args) {
@@ -1106,9 +1134,16 @@ function AdminSummary({ onSelect, selectedUnitId, state }) {
 }
 
 function AdminMessages({ onSendMessage, selectedUnitId, state }) {
-  const [title, setTitle] = useState('');
-  const [text, setText] = useState('');
-  const [targets, setTargets] = useState(() => UNITS.map((unit) => unit.id));
+  const initialDraft = useMemo(() => readAdminMessageDraft(), []);
+  const [title, setTitle] = useState(initialDraft.title);
+  const [text, setText] = useState(initialDraft.text);
+  const [targets, setTargets] = useState(initialDraft.targets);
+  const selectedCount = targets.length;
+  const hasNoTargets = selectedCount === 0;
+
+  useEffect(() => {
+    writeAdminMessageDraft({ title, text, targets });
+  }, [title, text, targets]);
 
   function toggleTarget(unitId) {
     setTargets((current) => {
@@ -1119,11 +1154,11 @@ function AdminMessages({ onSendMessage, selectedUnitId, state }) {
 
   async function submit(event) {
     event.preventDefault();
-    if (!text.trim()) return;
+    if (!text.trim() || hasNoTargets) return;
     await onSendMessage({
       title: title.trim() || 'Recado da Rosa',
       text: text.trim(),
-      targets: targets.length ? targets : UNITS.map((unit) => unit.id)
+      targets
     });
     setTitle('');
     setText('');
@@ -1150,10 +1185,33 @@ function AdminMessages({ onSendMessage, selectedUnitId, state }) {
             </button>
           ))}
         </div>
-        <button className="primary" type="submit">
+        <div className="target-tools">
+          <small className={`target-hint ${selectedCount ? '' : 'warning'}`}>
+            {selectedCount
+              ? `${selectedCount}/${UNITS.length} unidade(s) selecionada(s).`
+              : 'Nenhuma unidade selecionada: selecione ao menos uma para enviar.'}
+          </small>
+          <div className="target-actions">
+            <button
+              className="text-button"
+              disabled={selectedCount === UNITS.length}
+              onClick={() => setTargets(UNITS.map((unit) => unit.id))}
+              type="button"
+            >
+              Selecionar todas
+            </button>
+            <button className="text-button" disabled={!selectedCount} onClick={() => setTargets([])} type="button">
+              Limpar seleção
+            </button>
+          </div>
+        </div>
+        <button className="primary" disabled={hasNoTargets} type="submit">
           <Send size={17} /> Enviar
         </button>
       </form>
+      <small className="draft-hint">
+        {title.trim() || text.trim() ? 'Rascunho salvo neste aparelho.' : 'Sem rascunho pendente.'}
+      </small>
       <div className="sent-log">
         {state.messages
           .filter((message) => message.from !== 'unit' && (message.targets || []).includes(selectedUnitId))
@@ -1173,6 +1231,7 @@ function MessageHistory({ messages, onDeleteMessage, onUpdateMessage, selectedUn
   const [open, setOpen] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [draft, setDraft] = useState({ title: '', text: '', targets: [] });
+  const editingHasNoTargets = draft.targets.length === 0;
 
   function startEdit(message) {
     setEditingId(message.id);
@@ -1194,9 +1253,10 @@ function MessageHistory({ messages, onDeleteMessage, onUpdateMessage, selectedUn
 
   async function saveEdit(event) {
     event.preventDefault();
+    if (editingHasNoTargets) return;
     await onUpdateMessage(editingId, {
       ...draft,
-      targets: draft.targets.length ? draft.targets : UNITS.map((unit) => unit.id)
+      targets: draft.targets
     });
     setEditingId(null);
   }
@@ -1240,11 +1300,12 @@ function MessageHistory({ messages, onDeleteMessage, onUpdateMessage, selectedUn
                           </button>
                         ))}
                       </div>
+                      {editingHasNoTargets ? <small className="target-hint warning">Selecione ao menos uma unidade para salvar.</small> : null}
                       <div className="message-tools">
                         <button className="ghost" onClick={() => setEditingId(null)} type="button">
                           Cancelar
                         </button>
-                        <button className="primary" type="submit">
+                        <button className="primary" disabled={editingHasNoTargets} type="submit">
                           <Check size={17} /> Salvar
                         </button>
                       </div>
