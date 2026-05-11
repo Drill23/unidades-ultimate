@@ -1398,12 +1398,17 @@ function AdminMessages({ onSendMessage, selectedUnitId, state }) {
         {state.messages
           .filter((message) => message.from !== 'unit' && (message.targets || []).includes(selectedUnitId))
           .slice(0, 4)
-          .map((message) => (
-          <p key={message.id}>
-            <strong>{message.title}</strong>
-            <span>{(message.seenBy || []).length}/{message.targets.length} viram</span>
-          </p>
-        ))}
+          .map((message) => {
+            const hasReplyFromSelected = (message.replies || []).some((reply) => reply.unitId === selectedUnitId);
+            return (
+              <p key={message.id}>
+                <strong>{message.title}</strong>
+                <span>
+                  {(message.seenBy || []).length}/{message.targets.length} viram · {hasReplyFromSelected ? 'resposta recebida' : 'sem resposta'}
+                </span>
+              </p>
+            );
+          })}
       </div>
     </section>
   );
@@ -1422,12 +1427,14 @@ function MessageHistory({ messages, onDeleteMessage, onUpdateMessage, selectedUn
           acc.unit += 1;
           return acc;
         }
+        const hasReply = (message.replies || []).some((reply) => reply.unitId === selectedUnitId);
         if ((message.seenBy || []).includes(selectedUnitId)) acc.seen += 1;
         else acc.pending += 1;
-        if (!(message.replies || []).some((reply) => reply.unitId === selectedUnitId)) acc.noReply += 1;
+        if (hasReply) acc.replied += 1;
+        else acc.noReply += 1;
         return acc;
       },
-      { pending: 0, seen: 0, unit: 0, noReply: 0 }
+      { pending: 0, seen: 0, unit: 0, noReply: 0, replied: 0 }
     );
   }, [messages, selectedUnitId]);
   const filteredMessages = useMemo(() => {
@@ -1440,6 +1447,9 @@ function MessageHistory({ messages, onDeleteMessage, onUpdateMessage, selectedUn
     if (statusFilter === 'no-reply') {
       return messages.filter((message) => message.from !== 'unit' && !(message.replies || []).some((reply) => reply.unitId === selectedUnitId));
     }
+    if (statusFilter === 'replied') {
+      return messages.filter((message) => message.from !== 'unit' && (message.replies || []).some((reply) => reply.unitId === selectedUnitId));
+    }
     if (statusFilter === 'unit') return messages.filter((message) => message.from === 'unit');
     return messages;
   }, [messages, selectedUnitId, statusFilter]);
@@ -1448,6 +1458,7 @@ function MessageHistory({ messages, onDeleteMessage, onUpdateMessage, selectedUn
     pending: 'Sem recados pendentes de leitura desta unidade.',
     seen: 'Sem recados vistos desta unidade.',
     'no-reply': 'Sem recados aguardando resposta desta unidade.',
+    replied: 'Sem recados respondidos por esta unidade.',
     unit: 'Sem mensagens avulsas enviadas por esta unidade.'
   };
 
@@ -1506,6 +1517,9 @@ function MessageHistory({ messages, onDeleteMessage, onUpdateMessage, selectedUn
             </button>
             <button className={statusFilter === 'no-reply' ? 'active' : ''} onClick={() => setStatusFilter('no-reply')} type="button">
               Sem resposta <b>{counters.noReply}</b>
+            </button>
+            <button className={statusFilter === 'replied' ? 'active' : ''} onClick={() => setStatusFilter('replied')} type="button">
+              Com resposta <b>{counters.replied}</b>
             </button>
             <button className={statusFilter === 'unit' ? 'active' : ''} onClick={() => setStatusFilter('unit')} type="button">
               Avulsas <b>{counters.unit}</b>
