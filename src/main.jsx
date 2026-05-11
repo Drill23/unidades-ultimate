@@ -1382,9 +1382,10 @@ function MessageHistory({ messages, onDeleteMessage, onUpdateMessage, selectedUn
         }
         if ((message.seenBy || []).includes(selectedUnitId)) acc.seen += 1;
         else acc.pending += 1;
+        if (!(message.replies || []).some((reply) => reply.unitId === selectedUnitId)) acc.noReply += 1;
         return acc;
       },
-      { pending: 0, seen: 0, unit: 0 }
+      { pending: 0, seen: 0, unit: 0, noReply: 0 }
     );
   }, [messages, selectedUnitId]);
   const filteredMessages = useMemo(() => {
@@ -1394,6 +1395,9 @@ function MessageHistory({ messages, onDeleteMessage, onUpdateMessage, selectedUn
     if (statusFilter === 'seen') {
       return messages.filter((message) => message.from !== 'unit' && (message.seenBy || []).includes(selectedUnitId));
     }
+    if (statusFilter === 'no-reply') {
+      return messages.filter((message) => message.from !== 'unit' && !(message.replies || []).some((reply) => reply.unitId === selectedUnitId));
+    }
     if (statusFilter === 'unit') return messages.filter((message) => message.from === 'unit');
     return messages;
   }, [messages, selectedUnitId, statusFilter]);
@@ -1401,8 +1405,13 @@ function MessageHistory({ messages, onDeleteMessage, onUpdateMessage, selectedUn
     all: 'Nenhuma mensagem desta unidade ainda.',
     pending: 'Sem recados pendentes de leitura desta unidade.',
     seen: 'Sem recados vistos desta unidade.',
+    'no-reply': 'Sem recados aguardando resposta desta unidade.',
     unit: 'Sem mensagens avulsas enviadas por esta unidade.'
   };
+
+  useEffect(() => {
+    setStatusFilter('all');
+  }, [selectedUnitId]);
 
   function startEdit(message) {
     setEditingId(message.id);
@@ -1452,6 +1461,9 @@ function MessageHistory({ messages, onDeleteMessage, onUpdateMessage, selectedUn
             </button>
             <button className={statusFilter === 'seen' ? 'active' : ''} onClick={() => setStatusFilter('seen')} type="button">
               Vistas <b>{counters.seen}</b>
+            </button>
+            <button className={statusFilter === 'no-reply' ? 'active' : ''} onClick={() => setStatusFilter('no-reply')} type="button">
+              Sem resposta <b>{counters.noReply}</b>
             </button>
             <button className={statusFilter === 'unit' ? 'active' : ''} onClick={() => setStatusFilter('unit')} type="button">
               Avulsas <b>{counters.unit}</b>
