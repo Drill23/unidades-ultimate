@@ -39,6 +39,7 @@ const SESSION_KEY = 'unidades-session';
 const UNIT_DRAFT_KEY_PREFIX = 'unidades-unit-draft';
 const UNIT_REPLY_DRAFT_KEY_PREFIX = 'unidades-unit-reply-draft';
 const ADMIN_DRAFT_KEY = 'unidades-admin-draft';
+const ADMIN_MESSAGE_MAX_CHARS = 1200;
 const COLORS = ['#69b578', '#e0a458', '#5d8aa8', '#d96570', '#7b6bb7'];
 const PRIORITIES = {
   low: { label: 'baixa', weight: 1 },
@@ -242,17 +243,24 @@ function normalizeAdminTargets(targets) {
   return Array.from(new Set(targets.filter((unitId) => UNITS.some((unit) => unit.id === unitId))));
 }
 
+function normalizeAdminTemplateId(templateId) {
+  const clean = String(templateId || '');
+  return ADMIN_MESSAGE_TEMPLATES.some((template) => template.id === clean) ? clean : '';
+}
+
 function readAdminMessageDraft() {
   try {
     const parsed = JSON.parse(localStorage.getItem(ADMIN_DRAFT_KEY));
     const parsedTargets = normalizeAdminTargets(parsed?.targets);
+    const templateId = normalizeAdminTemplateId(parsed?.templateId);
     return {
       title: String(parsed?.title || ''),
       text: String(parsed?.text || ''),
-      targets: parsedTargets === null ? UNITS.map((unit) => unit.id) : parsedTargets
+      targets: parsedTargets === null ? UNITS.map((unit) => unit.id) : parsedTargets,
+      templateId
     };
   } catch {
-    return { title: '', text: '', targets: UNITS.map((unit) => unit.id) };
+    return { title: '', text: '', targets: UNITS.map((unit) => unit.id), templateId: '' };
   }
 }
 
@@ -261,16 +269,23 @@ function writeAdminMessageDraft(draft) {
   const clean = {
     title: String(draft?.title || ''),
     text: String(draft?.text || ''),
-    targets: normalizeAdminTargets(draft?.targets) || []
+    targets: normalizeAdminTargets(draft?.targets) || [],
+    templateId: normalizeAdminTemplateId(draft?.templateId)
   };
   const defaultTargetSet = new Set(defaultTargets);
   const hasCustomTargets =
     clean.targets.length !== defaultTargets.length || clean.targets.some((unitId) => !defaultTargetSet.has(unitId));
-  if (!clean.title.trim() && !clean.text.trim() && !hasCustomTargets) {
+  if (!clean.title.trim() && !clean.text.trim() && !hasCustomTargets && !clean.templateId) {
     localStorage.removeItem(ADMIN_DRAFT_KEY);
     return;
   }
   localStorage.setItem(ADMIN_DRAFT_KEY, JSON.stringify(clean));
+}
+
+function assertAdminMessageLength(text) {
+  if (String(text || '').trim().length > ADMIN_MESSAGE_MAX_CHARS) {
+    throw new Error(`Recado acima de ${ADMIN_MESSAGE_MAX_CHARS} caracteres`);
+  }
 }
 
 async function localCall(functionName, ...args) {
@@ -326,6 +341,8 @@ async function localCall(functionName, ...args) {
     const [, message] = args;
     if (session.role !== 'admin') throw new Error('Apenas Rosa pode enviar recados');
     const targets = message.targets?.length ? message.targets : UNITS.map((unit) => unit.id);
+    const cleanText = String(message.text || '').trim();
+    assertAdminMessageLength(cleanText);
     const next = normalizeState({
       ...state,
       updatedAt: isoNow(),
@@ -333,7 +350,7 @@ async function localCall(functionName, ...args) {
         {
           id: uid('msg'),
           title: message.title || 'Recado da Rosa',
-          text: message.text || '',
+          text: cleanText,
           targets,
           seenBy: [],
           replies: [],
@@ -384,12 +401,14 @@ async function localCall(functionName, ...args) {
     const [, messageId, patch] = args;
     if (session.role !== 'admin') throw new Error('Apenas Rosa pode editar recados');
     const targets = patch.targets?.length ? patch.targets : UNITS.map((unit) => unit.id);
+    const cleanText = String(patch.text || '').trim();
+    assertAdminMessageLength(cleanText);
     const next = normalizeState({
       ...state,
       updatedAt: isoNow(),
       messages: state.messages.map((message) =>
         message.id === messageId && message.from !== 'unit'
-          ? { ...message, title: patch.title || message.title, text: patch.text || '', targets, seenBy: [], updatedAt: isoNow() }
+          ? { ...message, title: patch.title || message.title, text: cleanText, targets, seenBy: [], updatedAt: isoNow() }
           : message
       )
     });
@@ -1233,14 +1252,16 @@ function AdminMessages({ onSendMessage, selectedUnitId, state }) {
   const [targets, setTargets] = useState(initialDraft.targets);
   const [isSending, setIsSending] = useState(false);
   const [sendError, setSendError] = useState('');
-  const [lastTemplateId, setLastTemplateId] = useState('');
+  const [lastTemplateId, setLastTemplateId] = useState(initialDraft.templateId);
   const selectedCount = targets.length;
   const hasNoTargets = selectedCount === 0;
   const selectedUnitName = unitName(selectedUnitId);
+  const cleanText = text.trim();
+  const isOverTextLimit = cleanText.length > ADMIN_MESSAGE_MAX_CHARS;
 
   useEffect(() => {
-    writeAdminMessageDraft({ title, text, targets });
-  }, [title, text, targets]);
+    writeAdminMessageDraft({ title, text, targets, templateId: lastTemplateId });
+  }, [title, text, targets, lastTemplateId]);
 
   function toggleTarget(unitId) {
     setTargets((current) => {
@@ -1259,20 +1280,25 @@ function AdminMessages({ onSendMessage, selectedUnitId, state }) {
 
   async function submit(event) {
     event.preventDefault();
-    if (!text.trim() || hasNoTargets || isSending) return;
+    if (!cleanText || hasNoTargets || isSending || isOverTextLimit) return;
     setSendError('');
     setIsSending(true);
     try {
       await onSendMessage({
         title: title.trim() || 'Recado da Rosa',
-        text: text.trim(),
+        text: cleanText,
         targets
       });
       setTitle('');
       setText('');
       setTargets(UNITS.map((unit) => unit.id));
-    } catch {
-      setSendError('Não consegui enviar o recado agora.');
+      setLastTemplateId('');
+    } catch (error) {
+      if (String(error?.message || '').includes(String(ADMIN_MESSAGE_MAX_CHARS))) {
+        setSendError(`Limite de ${ADMIN_MESSAGE_MAX_CHARS} caracteres no recado.`);
+      } else {
+        setSendError('Não consegui enviar o recado agora.');
+      }
     } finally {
       setIsSending(false);
     }
@@ -1307,10 +1333,26 @@ function AdminMessages({ onSendMessage, selectedUnitId, state }) {
         >
           Usar para {selectedUnitName}
         </button>
+        <button
+          className="text-button"
+          disabled={isSending || (!title.trim() && !text.trim() && selectedCount === UNITS.length && !lastTemplateId)}
+          onClick={() => {
+            setTitle('');
+            setText('');
+            setTargets(UNITS.map((unit) => unit.id));
+            setLastTemplateId('');
+          }}
+          type="button"
+        >
+          Limpar rascunho
+        </button>
       </div>
       <form className="message-form" onSubmit={submit}>
         <input disabled={isSending} onChange={(event) => setTitle(event.target.value)} placeholder="Título do recado" value={title} />
         <textarea disabled={isSending} onChange={(event) => setText(event.target.value)} placeholder="Mensagem" value={text} />
+        <small className={`target-hint ${isOverTextLimit ? 'warning' : ''}`}>
+          {cleanText.length}/{ADMIN_MESSAGE_MAX_CHARS} caracteres
+        </small>
         <div className="target-row">
           {UNITS.map((unit) => (
             <button
@@ -1344,7 +1386,7 @@ function AdminMessages({ onSendMessage, selectedUnitId, state }) {
             </button>
           </div>
         </div>
-        <button className="primary" disabled={hasNoTargets || !text.trim() || isSending} type="submit">
+        <button className="primary" disabled={hasNoTargets || !cleanText || isSending || isOverTextLimit} type="submit">
           <Send size={17} /> {isSending ? 'Enviando...' : 'Enviar'}
         </button>
       </form>
@@ -2249,6 +2291,14 @@ function NewDocumentModal({ onClose, onCreate }) {
   const [taskDraft, setTaskDraft] = useState('');
   const [tasks, setTasks] = useState([]);
 
+  useEffect(() => {
+    function handleEscape(event) {
+      if (event.key === 'Escape') onClose();
+    }
+    window.addEventListener('keydown', handleEscape);
+    return () => window.removeEventListener('keydown', handleEscape);
+  }, [onClose]);
+
   function addTask() {
     const text = taskDraft.trim();
     if (!text) return;
@@ -2358,6 +2408,14 @@ function NewDocumentModal({ onClose, onCreate }) {
 function TrashModal({ mode, onClose, onConfirm, unitName }) {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
+
+  useEffect(() => {
+    function handleEscape(event) {
+      if (event.key === 'Escape') onClose();
+    }
+    window.addEventListener('keydown', handleEscape);
+    return () => window.removeEventListener('keydown', handleEscape);
+  }, [onClose]);
 
   async function submit(event) {
     event.preventDefault();
