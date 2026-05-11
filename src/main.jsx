@@ -237,12 +237,15 @@ function writeUnitReplyDraft(unitId, messageId, text) {
   localStorage.setItem(unitReplyDraftKey(unitId, messageId), JSON.stringify({ text: clean }));
 }
 
+function normalizeAdminTargets(targets) {
+  if (!Array.isArray(targets)) return null;
+  return Array.from(new Set(targets.filter((unitId) => UNITS.some((unit) => unit.id === unitId))));
+}
+
 function readAdminMessageDraft() {
   try {
     const parsed = JSON.parse(localStorage.getItem(ADMIN_DRAFT_KEY));
-    const parsedTargets = Array.isArray(parsed?.targets)
-      ? Array.from(new Set(parsed.targets.filter((unitId) => UNITS.some((unit) => unit.id === unitId))))
-      : null;
+    const parsedTargets = normalizeAdminTargets(parsed?.targets);
     return {
       title: String(parsed?.title || ''),
       text: String(parsed?.text || ''),
@@ -254,12 +257,15 @@ function readAdminMessageDraft() {
 }
 
 function writeAdminMessageDraft(draft) {
+  const defaultTargets = UNITS.map((unit) => unit.id);
   const clean = {
     title: String(draft?.title || ''),
     text: String(draft?.text || ''),
-    targets: Array.isArray(draft?.targets) ? draft.targets.filter((unitId) => UNITS.some((unit) => unit.id === unitId)) : []
+    targets: normalizeAdminTargets(draft?.targets) || []
   };
-  const hasCustomTargets = clean.targets.length !== UNITS.length;
+  const defaultTargetSet = new Set(defaultTargets);
+  const hasCustomTargets =
+    clean.targets.length !== defaultTargets.length || clean.targets.some((unitId) => !defaultTargetSet.has(unitId));
   if (!clean.title.trim() && !clean.text.trim() && !hasCustomTargets) {
     localStorage.removeItem(ADMIN_DRAFT_KEY);
     return;
@@ -1226,6 +1232,7 @@ function AdminMessages({ onSendMessage, selectedUnitId, state }) {
   const [text, setText] = useState(initialDraft.text);
   const [targets, setTargets] = useState(initialDraft.targets);
   const [isSending, setIsSending] = useState(false);
+  const [sendError, setSendError] = useState('');
   const [lastTemplateId, setLastTemplateId] = useState('');
   const selectedCount = targets.length;
   const hasNoTargets = selectedCount === 0;
@@ -1253,6 +1260,7 @@ function AdminMessages({ onSendMessage, selectedUnitId, state }) {
   async function submit(event) {
     event.preventDefault();
     if (!text.trim() || hasNoTargets || isSending) return;
+    setSendError('');
     setIsSending(true);
     try {
       await onSendMessage({
@@ -1263,6 +1271,8 @@ function AdminMessages({ onSendMessage, selectedUnitId, state }) {
       setTitle('');
       setText('');
       setTargets(UNITS.map((unit) => unit.id));
+    } catch {
+      setSendError('Não consegui enviar o recado agora.');
     } finally {
       setIsSending(false);
     }
@@ -1338,6 +1348,7 @@ function AdminMessages({ onSendMessage, selectedUnitId, state }) {
           <Send size={17} /> {isSending ? 'Enviando...' : 'Enviar'}
         </button>
       </form>
+      {sendError ? <p className="error-line">{sendError}</p> : null}
       <small className="draft-hint">
         {title.trim() || text.trim() || selectedCount !== UNITS.length ? 'Rascunho salvo neste aparelho.' : 'Sem rascunho pendente.'}
       </small>
