@@ -1399,12 +1399,13 @@ function AdminMessages({ onSendMessage, selectedUnitId, state }) {
           .filter((message) => message.from !== 'unit' && (message.targets || []).includes(selectedUnitId))
           .slice(0, 4)
           .map((message) => {
-            const hasReplyFromSelected = (message.replies || []).some((reply) => reply.unitId === selectedUnitId);
+            const repliedUnitsCount = new Set((message.replies || []).map((reply) => reply.unitId)).size;
             return (
               <p key={message.id}>
                 <strong>{message.title}</strong>
-                <span>
-                  {(message.seenBy || []).length}/{message.targets.length} viram · {hasReplyFromSelected ? 'resposta recebida' : 'sem resposta'}
+                <span className="sent-metrics">
+                  <span>{(message.seenBy || []).length}/{message.targets.length} viram</span>
+                  <span>{repliedUnitsCount}/{message.targets.length} responderam</span>
                 </span>
               </p>
             );

@@ -1023,6 +1023,12 @@ label {
   padding: 7px 9px;
 }
 
+.sent-metrics {
+  display: grid;
+  gap: 2px;
+  justify-items: end;
+}
+
 .password-card {
   align-self: start;
   padding: 12px 14px;
